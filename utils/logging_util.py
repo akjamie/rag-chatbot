@@ -1,64 +1,53 @@
 # logging_util.py
-
-from loguru import logger
+import os
 import sys
+import logging
+from logging.handlers import RotatingFileHandler
+from pathlib import Path
 
+# Default logging configuration
+DEFAULT_LOG_CONFIG = {
+    'level': 'INFO',
+    'format': '%(asctime)s | %(levelname)s | %(threadName)s | %(module)s:%(funcName)s:%(lineno)d | %(metadata)s | %(message)s',
+    'date_format': '%Y-%m-%d %H:%M:%S'
+}
 
-def configure_logger(log_file="app.log", max_bytes=10 * 1024 * 1024, backup_count=5):
-    """
-    Configures the logger with custom format, colors, rolling, and max bytes.
-
-    :param log_file: Path to the log file (default is "app.log").
-    :param max_bytes: Maximum size of the log file before it rolls over (default is 10 MB).
-    :param backup_count: Number of backup log files to keep (default is 5).
-    """
-    # Define a custom format string with explicit colorization
-    custom_format = (
-        "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | "
-        "{level.icon} {level.name:<8} | "
-        "<blue>{thread.name}</blue> | "
-        "<blue>{process}</blue> | "
-        "<cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - "
-        "{message}"
+def configure_logger(log_file_path: str = None, config: dict = None) -> logging.Logger:
+    """Configure and return a logger instance"""
+    log_config = config or DEFAULT_LOG_CONFIG
+    
+    # Create logger
+    logger = logging.getLogger('app')
+    logger.setLevel(log_config.get('level', 'INFO'))
+    
+    # Create formatters and handlers
+    formatter = logging.Formatter(
+        fmt=log_config.get('format', DEFAULT_LOG_CONFIG['format']),
+        datefmt=log_config.get('date_format', DEFAULT_LOG_CONFIG['date_format'])
     )
-
-    # Define a custom colorizer function
-    def custom_colorizer(record):
-        level_color = {
-            "TRACE": "magenta",
-            "DEBUG": "blue",
-            "INFO": "green",
-            "SUCCESS": "bold_green",
-            "WARNING": "yellow",
-            "ERROR": "red",
-            "CRITICAL": "bold_red"
-        }
-        return level_color.get(record["level"].name, "")
-
-    logger.remove()
-    logger.add(sink=log_file, format=custom_format, colorize=False, enqueue=True, rotation=max_bytes,
-               retention=backup_count)
-
-    logger.add(
-        sink=sys.stdout,
-        format=(
-            "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | "
-            "<level>{level.icon} {level.name:<8}</level> | "
-            "<blue>{thread.name}</blue> | "
-            "<blue>{process}</blue> | "
-            "<cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - "
-            "<level>{message}</level>"
-        ),
-        colorize=True,  # Enable colorization for console output
-        enqueue=True,
-    )
-
+    
+    # Console handler
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setFormatter(formatter)
+    logger.addHandler(console_handler)
+    
+    # File handler (if path provided)
+    if log_file_path:
+        # Ensure directory exists
+        log_dir = os.path.dirname(log_file_path)
+        if log_dir:
+            os.makedirs(log_dir, exist_ok=True)
+            
+        file_handler = RotatingFileHandler(
+            log_file_path,
+            maxBytes=10*1024*1024,  # 10MB
+            backupCount=5
+        )
+        file_handler.setFormatter(formatter)
+        logger.addHandler(file_handler)
+    
     return logger
 
-
-# Initialize the logger
+# Initialize default logger
+BASE_DIR = str(Path(__file__).resolve().parent)
 logger = configure_logger()
-logger.level("DEBUG")
-
-if __name__ == "__main__":
-    logger.info("This is an info message.")

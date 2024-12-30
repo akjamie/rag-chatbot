@@ -1,80 +1,116 @@
-import asyncio
-import os
+from contextlib import asynccontextmanager
 
-import dotenv
-from fastapi import FastAPI
-from datetime import timedelta
+from fastapi import FastAPI, Request
 from langchain.globals import set_debug
-from langchain_community.chat_models import ChatSparkLLM
-from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_community.llms.sparkllm import SparkLLM
-from langchain_postgres import PGVector
-from langchain_qdrant import QdrantVectorStore
-from langchain_redis import RedisConfig, RedisVectorStore
+from starlette.middleware.base import BaseHTTPMiddleware
 
+from api.chat_history_routes import router as chat_history_router
+from api.chat_routes import router as chat_router
+from api.embedding_routes import router as embedding_router
 from config.common_settings import CommonConfig
-from handler.generic_query_handler import QueryHandler
-from preprocess.index_log_helper import IndexLogHelper
-from utils.logging_util import logger
+from preprocess.doc_embedding_job import DocEmbeddingJob
+from utils.id_util import get_id
+from utils.logging_util import logger, set_context, clear_context
 
-from preprocess.doc_embeddings import DocEmbeddingsProcessor
-
-dotenv.load_dotenv()
-set_debug(True)
-app = FastAPI()
-
+# Global config instance
 base_config = CommonConfig()
 
-llm = base_config.get_model("llm")
-llm_chat = base_config.get_model("chatllm")
-embeddings = base_config.get_model("embedding")
-# embeddings = HuggingFaceEmbeddings(model="sentence-transformers/all-mpnet-base-v2")
-collection_name = "rag_docs"
-# vector_store = QdrantVectorStore.from_existing_collection(
-#     embedding=embeddings,
-#     collection_name=collection_name,
-#     api_key=os.environ["QDRANT_API_KEY"],
-#     url="http://localhost:6333",
-# )
-postgres_uri = os.environ["POSTGRES_URI"]
-# vector_store = PGVector(
-#     embeddings=embeddings,
-#     collection_name=collection_name,
-#     connection=postgres_uri,
-#     use_jsonb=True,
-# )
 
-config = RedisConfig(
-    index_name="rag_docs",
-    redis_url=os.environ["REDIS_URL"],
-    distance_metric="COSINE",  # Options: COSINE, L2, IP
-)
-vector_store = RedisVectorStore(embeddings, config=config)
+class LoggingContextMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        # Get user_id from headers (required)
+        user_id = request.headers.get('X-User-Id', 'unknown')
+        
+        # Get optional session_id and request_id from headers
+        session_id = request.headers.get('X-Session-Id')
+        request_id = request.headers.get('X-Request-Id')
+        
+        # For /query endpoints, generate missing IDs
+        if request.url.path == '/chat/completion':
+            headers_modified = False
+            
+            if not session_id:
+                session_id = f"sess_{get_id().lower()}"
+                # Modify request headers
+                request.headers._list.append(
+                    (b'x-session-id', session_id.encode())
+                )
+                headers_modified = True
+                logger.debug(f"Generated new session_id: {session_id}")
+            
+            if not request_id:
+                request_id = f"req_{get_id().lower()}"
+                # Modify request headers
+                request.headers._list.append(
+                    (b'x-request-id', request_id.encode())
+                )
+                headers_modified = True
+                logger.debug(f"Generated new request_id: {request_id}")
+            
+            if headers_modified:
+                # Update the headers scope for ASGI
+                request.scope['headers'] = request.headers._list
+        else:
+            # For non-query endpoints, use defaults if not provided
+            session_id = session_id or 'unknown'
+            request_id = request_id or 'unknown'
 
-indexLogHelper = IndexLogHelper(postgres_uri)
-docEmbeddingsProcessor = DocEmbeddingsProcessor(embeddings, vector_store, indexLogHelper)
-queryHandler = QueryHandler(llm, vector_store)
+        # Set context using keyword arguments
+        set_context(
+            user_id=user_id,
+            session_id=session_id,
+            request_id=request_id
+        )
+
+        try:
+            response = await call_next(request)
+            return response
+        finally:
+            clear_context()
 
 
-async def preprocess():
-    logger.info("Loading documents...")
-    await docEmbeddingsProcessor.load_documents(base_config.get_embedding_config().get("input_path"))
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Lifecycle manager for FastAPI application"""
+    embedding_job = None
+    try:
+        # Startup
+        logger.info("Initializing application...")
+
+        # Initialize config and setup proxy first
+        proxy_result = await base_config.asetup_proxy()
+        logger.info(f"Proxy setup {'enabled' if proxy_result else 'disabled'}")
+
+        # Initialize other components (make this non-blocking)
+        embedding_job = DocEmbeddingJob()
+        init_result = await embedding_job.initialize()
+        logger.info(f"Document embedding job initialization {'successful' if init_result else 'failed'}")
+
+        logger.info("Application startup completed")
+
+        # Important: yield here to let FastAPI take control
+        yield
+
+    except Exception as e:
+        logger.error(f"Startup error: {str(e)}")
+        raise
+    finally:
+        # Shutdown
+        if embedding_job and embedding_job.scheduler:
+            embedding_job.scheduler.shutdown()
+        logger.info("Shutting down application...")
 
 
-@app.get("/query")
-def query(query: str):
-    logger.info("Query: " + query)
-    return queryHandler.handle(query)
+app = FastAPI(lifespan=lifespan)
+app.add_middleware(LoggingContextMiddleware)
+
+app.include_router(chat_history_router, prefix="/chat")
+app.include_router(embedding_router, prefix="/embedding")
+app.include_router(chat_router, prefix="/chat")
 
 
 if __name__ == "__main__":
-    os.environ["no_proxy"] = "localhost,127.0.0.1"
-    os.environ["https_proxy"] = "http://127.0.0.1:7890"
-    asyncio.run(preprocess())
-
-    from langchain.globals import set_debug
-
-    set_debug(True)
+    # set_debug(True)
     import uvicorn
 
     uvicorn.run(app, host="0.0.0.0", port=8000)
