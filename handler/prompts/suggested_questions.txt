@@ -1,0 +1,41 @@
+As a helpful AI assistant, generate {max_questions} highly relevant follow-up questions.
+
+ORIGINAL QUERY: {original_query}
+
+ANSWER PROVIDED: {answer_content}
+
+AVAILABLE SOURCES: {sources}
+
+{chat_history}
+
+GUIDELINES FOR GENERATING QUESTIONS:
+1. EXPLORATION & DEPTH
+- Explore important aspects not fully covered in the answer
+- Dive deeper into key concepts mentioned
+- Address potential gaps in understanding
+
+2. PRACTICAL RELEVANCE
+- Focus on practical applications
+- Consider real-world implications
+- Include "how to" or implementation questions
+
+3. CONTEXTUAL AWARENESS
+- Build upon information from sources
+- Avoid repeating already answered aspects
+- Consider user's knowledge level from chat history
+
+4. QUESTION TYPES (Mix these):
+- Clarification: "Could you explain more about..."
+- Application: "How could [concept] be applied to..."
+- Analysis: "What are the implications of..."
+- Comparison: "How does [X] compare to..."
+- Problem-solving: "What strategies could..."
+
+5. FORMATTING RULES:
+- Make questions concise (15 words max)
+- Start with question words (What, How, Why, etc.)
+- Ensure questions are self-contained
+- Avoid yes/no questions
+- Use natural, conversational language
+
+Generate {max_questions} questions that would most benefit the user's understanding: 
