@@ -68,3 +68,16 @@ app:
     utils.lock: "WARNING"
     langchain: "WARNING"
     httpx: "WARNING"
+  tools:
+    query_rewriter:
+      enabled: true
+    response_formatter:
+      enabled: true
+    query_expander:
+      enabled: true
+    response_grader:
+      enabled: true
+    web_search:
+      enabled: false
+    document_retriever:
+      enabled: true

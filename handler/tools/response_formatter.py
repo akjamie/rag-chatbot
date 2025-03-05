@@ -1,23 +1,48 @@
-from typing import Dict, Any, List, Optional, Literal
+import re
+import traceback
+from dataclasses import dataclass
+from typing import List, Tuple, Dict, Any, Optional, Union
+from typing import Literal
+from enum import Enum
+
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage
-from langchain_core.documents import Document
+
 from config.common_settings import CommonConfig
+from handler.tools.base_tool import BaseTool, ToolDescription, ToolCategory, ToolArgument
 from utils.logging_util import logger
-import re
-from typing import List, Tuple, Dict
 
 OutputFormat = Literal["chart", "table", "markdown", "code", "text"]
 
+class ChartType(Enum):
+    LINE = "line"
+    BAR = "bar"
+    PIE = "pie"
+    SCATTER = "scatter"
 
-class ResponseFormatter:
+@dataclass
+class FormattedResponse:
+    response: str
+    output_format: str
+
+@dataclass
+class ChartData:
+    """Structured chart data for frontend rendering"""
+    type: ChartType
+    title: str
+    labels: List[str]
+    datasets: List[Dict[str, Any]]
+    options: Optional[Dict[str, Any]] = None
+
+class ResponseFormatter(BaseTool[FormattedResponse]):
     """
     Formats the final response with minimal modifications while ensuring consistent structure.
     Supports multiple output formats with pattern-based detection and validation.
     """
 
-    def __init__(self, llm: BaseChatModel, config: CommonConfig):
-        self.llm = llm
+    def __init__(self, config: CommonConfig):
+        super().__init__(config)
+        self.llm = config.get_model("chatllm")
         self.config = config
         self.logger = logger
         
@@ -51,51 +76,56 @@ class ResponseFormatter:
             "shell": [r"#!/bin/\w+", r"\$ \w+", r"echo ", r"sudo "]
         }
 
-    def run(self, state: Dict[str, Any]) -> Dict[str, Any]:
-        """Main entry point for response formatting"""
+    @property
+    def description(self) -> ToolDescription:
+        return ToolDescription(
+            name="response_formatter",
+            description="Formats and structures response content based on type detection",
+            category=ToolCategory.FORMATTING,
+            args={
+                "response": ToolArgument(
+                    description="The content to be formatted",
+                    type="str",
+                    example="This is a sample response",
+                    optional=False
+                )
+            },
+            return_type="FormattedResponse"
+        )
+
+    def run(self, **kwargs) -> FormattedResponse:
+        self.validate_inputs(**kwargs)
+
         try:
-            response = state.get("response", "")
-            user_input = state.get("rewritten_query", state.get("user_input", ""))
-            
+            response = kwargs["response"]
+
             if not response:
-                return state
+                return FormattedResponse(response="", output_format="text")
 
             # 1. Initial format detection using patterns
             detected_format = self._detect_format_patterns(response)
-            
+
             # 2. LLM confirmation only if pattern detection is ambiguous
             if not detected_format:
-                detected_format = self._confirm_format_llm(response, user_input)
+                detected_format = self._confirm_format_llm(response)
 
             # 3. Apply formatting with validation
             formatted_response = self._apply_format(response, detected_format)
-            
+
             # 4. Validate output structure
             if not self._validate_formatted_output(formatted_response, detected_format):
                 self.logger.warning("Format validation failed, using plain text")
-                return {
-                    "response": response.strip(),
-                    "output_format": "text"
-                }
+                return FormattedResponse(response="", output_format="text")
 
             return {
-                "response": formatted_response,
+                "response": response.strip(),
                 "output_format": detected_format
             }
 
         except Exception as e:
-            self.logger.error(f"Error formatting response: {str(e)}")
-            return {"response": response, "output_format": "text"}
+            self.logger.error(f"Error in response formatting: {str(e)}, stack: {traceback.format_exc()}")
+            return FormattedResponse(response="", output_format="text")
 
-    def _detect_format_patterns(self, response: str) -> str:
-        """Detect format using regex patterns first"""
-        for format_type, patterns in self.format_patterns.items():
-            for pattern in patterns:
-                if re.search(pattern, response, re.MULTILINE):
-                    self.logger.debug(f"Detected {format_type} format using pattern")
-                    return format_type
-                    
-        return "text" if len(response.split()) < 30 else "markdown"
 
     def _confirm_format_llm(self, response: str, user_input: str) -> str:
         """Use LLM only to confirm format in ambiguous cases"""
@@ -117,7 +147,7 @@ class ResponseFormatter:
             format_result = self.llm.invoke([
                 HumanMessage(content=prompt.format(response=response))
             ]).content.lower().strip()
-            
+
             return format_result if format_result in ["chart", "table", "code", "markdown", "text"] else "text"
         except:
             return "text"
@@ -136,16 +166,16 @@ class ResponseFormatter:
         """Apply formatting with minimal content modification"""
         if format_type == "text":
             return response.strip()
-            
+
         if format_type == "code":
             return self._format_code_minimal(response)
-            
+
         if format_type == "table":
             return self._format_table_minimal(response)
-            
+
         if format_type == "chart":
-            return self._format_chart_minimal(response)
-            
+            return self._format_chart(response)
+
         # Default markdown formatting
         return self._format_markdown_minimal(response)
 
@@ -260,82 +290,137 @@ class ResponseFormatter:
             self.logger.error(f"Error formatting table: {str(e)}")
             return response
 
-    def _format_chart_minimal(self, response: str) -> str:
-        """Format chart data with ASCII/Unicode visualization"""
-        def extract_chart_data(text: str) -> Dict[str, List[Tuple[str, float]]]:
-            data = {
-                "time_series": [],
-                "percentages": [],
-                "quantities": [],
-                "comparisons": []
-            }
-            
-            # Extract time series data
-            time_series = re.finditer(self.format_patterns["chart"][0], text)
-            for match in time_series:
-                date = re.search(r"\d{4}[-/]\d{1,2}[-/]\d{1,2}", match.group())
-                value = re.search(r"(?:\d+(?:\.\d+)?)", match.group())
-                if date and value:
-                    data["time_series"].append((date.group(), float(value.group())))
-            
-            # Extract percentages
-            percentages = re.finditer(self.format_patterns["chart"][1], text)
-            for match in percentages:
-                value = float(match.group().rstrip('%'))
-                data["percentages"].append((match.group(), value))
-            
-            # Extract quantities
-            quantities = re.finditer(self.format_patterns["chart"][2], text)
-            for match in quantities:
-                value = float(re.search(r"\d+(?:\.\d+)?", match.group()).group())
-                data["quantities"].append((match.group(), value))
-            
-            return data
-
-        def create_ascii_chart(data: Dict[str, List[Tuple[str, float]]]) -> str:
-            if not any(data.values()):
-                return response
-            
-            chart_lines = ["```chart"]
-            
-            # Handle time series
-            if data["time_series"]:
-                dates, values = zip(*sorted(data["time_series"]))
-                max_val = max(values)
-                scale = 40 / max_val
-                
-                chart_lines.append("Time Series Data:")
-                for date, val in zip(dates, values):
-                    bar = '█' * int(val * scale)
-                    chart_lines.append(f"{date} {val:>8.1f} | {bar}")
-            
-            # Handle percentages
-            if data["percentages"]:
-                chart_lines.append("\nPercentage Distribution:")
-                for label, val in data["percentages"]:
-                    bar = '█' * int(val * 0.4)  # Scale to 40 chars max
-                    chart_lines.append(f"{label:>8} | {bar}")
-            
-            # Handle quantities
-            if data["quantities"]:
-                chart_lines.append("\nQuantity Comparison:")
-                max_val = max(val for _, val in data["quantities"])
-                scale = 40 / max_val
-                for label, val in data["quantities"]:
-                    bar = '█' * int(val * scale)
-                    chart_lines.append(f"{label:>8} | {bar}")
-            
-            chart_lines.append("```")
-            return '\n'.join(chart_lines)
-
+    def _format_chart(self, response: str) -> Dict[str, Any]:
+        """Format numerical data into structured chart data for frontend rendering"""
         try:
-            chart_data = extract_chart_data(response)
-            if any(chart_data.values()):
-                return create_ascii_chart(chart_data)
-            return response
+            # Extract and analyze data
+            data_series = self._extract_chart_data(response)
+            if not data_series:
+                return {"type": "text", "content": response}
+
+            # Determine best chart type and format data accordingly
+            chart_data = self._prepare_chart_data(data_series)
+            
+            return {
+                "type": "chart",
+                "content": chart_data.dict(),
+                "original_text": response
+            }
         except Exception as e:
-            self.logger.error(f"Error formatting chart: {str(e)}")
-            return response
+            self.logger.error(f"Chart formatting failed: {str(e)}")
+            return {"type": "text", "content": response}
+
+    def _extract_chart_data(self, text: str) -> Dict[str, Any]:
+        """Extract numerical data and determine structure"""
+        data = {
+            "time_series": [],
+            "categories": [],
+            "comparisons": []
+        }
+
+        # Time series pattern (dates with values)
+        time_pattern = r'(\d{4}[-/]\d{1,2}[-/]\d{1,2})\s*[,:]\s*(\d+(?:\.\d+)?)'
+        for match in re.finditer(time_pattern, text):
+            date, value = match.groups()
+            data["time_series"].append({
+                "x": date,
+                "y": float(value)
+            })
+
+        # Category pattern (label with value)
+        category_pattern = r'([\w\s]+):\s*(\d+(?:\.\d+)?[kmbtKMBT%]?)'
+        for match in re.finditer(category_pattern, text):
+            label, value = match.groups()
+            data["categories"].append({
+                "label": label.strip(),
+                "value": self._normalize_number(value)
+            })
+
+        # Comparison pattern
+        comparison_pattern = r'(\d+(?:\.\d+)?%?)\s*(?:vs\.?|versus|compared to)\s*(\d+(?:\.\d+)?%?)'
+        for match in re.finditer(comparison_pattern, text):
+            val1, val2 = match.groups()
+            data["comparisons"].append({
+                "values": [
+                    self._normalize_number(val1),
+                    self._normalize_number(val2)
+                ]
+            })
+
+        return data
+
+    def _prepare_chart_data(self, data: Dict[str, Any]) -> ChartData:
+        """Convert extracted data into appropriate chart format"""
+        if data["time_series"]:
+            return self._create_time_series_chart(data["time_series"])
+        elif data["categories"]:
+            return self._create_category_chart(data["categories"])
+        elif data["comparisons"]:
+            return self._create_comparison_chart(data["comparisons"])
+        else:
+            raise ValueError("No valid chart data found")
+
+    def _create_time_series_chart(self, data: List[Dict[str, Any]]) -> ChartData:
+        """Create time series chart data"""
+        return ChartData(
+            type=ChartType.LINE,
+            title="Time Series Data",
+            labels=[point["x"] for point in data],
+            datasets=[{
+                "label": "Value",
+                "data": [point["y"] for point in data],
+                "borderColor": "#3b82f6",  # Tailwind blue-500
+                "fill": False
+            }],
+            options={
+                "scales": {
+                    "x": {
+                        "type": "time",
+                        "time": {
+                            "unit": "day"
+                        }
+                    }
+                }
+            }
+        )
+
+    def _create_category_chart(self, data: List[Dict[str, Any]]) -> ChartData:
+        """Create category-based chart data"""
+        return ChartData(
+            type=ChartType.BAR,
+            title="Category Distribution",
+            labels=[item["label"] for item in data],
+            datasets=[{
+                "label": "Value",
+                "data": [item["value"] for item in data],
+                "backgroundColor": [
+                    "#3b82f6",  # blue-500
+                    "#ef4444",  # red-500
+                    "#10b981",  # green-500
+                    "#f59e0b",  # yellow-500
+                    "#6366f1"   # indigo-500
+                ]
+            }]
+        )
+
+    def _normalize_number(self, value: str) -> float:
+        """Convert string number with possible suffix to float"""
+        multipliers = {
+            'k': 1e3,
+            'm': 1e6,
+            'b': 1e9,
+            't': 1e12
+        }
+        
+        value = value.lower().strip()
+        if value.endswith('%'):
+            return float(value.rstrip('%'))
+            
+        for suffix, multiplier in multipliers.items():
+            if value.endswith(suffix):
+                return float(value[:-1]) * multiplier
+                
+        return float(value)
 
     def _format_markdown_minimal(self, response: str) -> str:
         """Apply minimal markdown formatting while preserving content"""

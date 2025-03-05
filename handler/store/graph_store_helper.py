@@ -1,5 +1,6 @@
 import os
 import traceback
+import re
 from typing import List, Dict, Any
 
 from langchain_core.documents import Document
@@ -13,17 +14,17 @@ CURRENT_FILE_PATH = os.path.abspath(__file__)
 # Get the directory containing the current file
 BASE_DIR = os.path.dirname(CURRENT_FILE_PATH)
 
+
 class GraphStoreHelper:
-    def __init__(self, graph_db: GraphDatabase,config: CommonConfig):
+    def __init__(self, graph_db: GraphDatabase, config: CommonConfig):
         self.logger = logger
         self.driver = graph_db
         self.config = config
-        
+
         if not self.driver:
             self.logger.warning("No Neo4j driver provided - graph store operations will be disabled")
             return
         self.nlp = self.config.get_nlp_spacy()
-
 
     def find_related_chunks(self, query: str, k: int = 3) -> List[Document]:
         """Enhanced graph search with fuzzy matching and scoring"""
@@ -32,10 +33,9 @@ class GraphStoreHelper:
             if not entities:
                 self.logger.warning(f"No entities extracted from query: {query}")
                 return []
-            
-            # Debug logging for extracted entities
+
             self.logger.debug(f"Using entities for search: {entities}")
-            
+
             with self.driver.session() as session:
                 result = session.run("""
                     // Match entities with fuzzy matching
@@ -44,11 +44,11 @@ class GraphStoreHelper:
                         e.normalized_name CONTAINS entity.normalized_text OR
                         entity.normalized_text CONTAINS e.normalized_name OR
                         e.name = entity.text)
-                    
-                    // Find connected chunks and documents
+
+                    // Find connected chunks and documents using doc_id as primary key
                     MATCH (e)<-[m:MENTIONS]-(c:Chunk)<-[:HAS_CHUNK]-(d:Document)
                     WHERE NOT EXISTS((d)<-[:REPLACES]-())
-                    
+
                     // Calculate relevance score
                     WITH c, d, e, m,
                          sum(CASE 
@@ -60,7 +60,7 @@ class GraphStoreHelper:
                              type: e.type,
                              context: m.context
                          }) as entity_matches
-                    
+
                     // Aggregate and sort results
                     WITH c, d, 
                          relevance_score,
@@ -68,7 +68,8 @@ class GraphStoreHelper:
                          size(entity_matches) as match_count
                     ORDER BY relevance_score DESC, match_count DESC
                     LIMIT $k
-                    
+
+                    // Return results with doc_id as primary identifier
                     RETURN 
                         c.content as content,
                         d.doc_id as doc_id,
@@ -88,7 +89,7 @@ class GraphStoreHelper:
                 documents = [Document(
                     page_content=record["content"],
                     metadata={
-                        "doc_id": record["doc_id"],
+                        "doc_id": record["doc_id"],  # Primary identifier
                         "source": record["source"],
                         "source_type": record["source_type"],
                         "graph_score": record["graph_score"],
@@ -96,8 +97,7 @@ class GraphStoreHelper:
                         "retrieval_type": "graph"
                     }
                 ) for record in result]
-                
-                # Debug logging for results
+
                 self.logger.debug(f"Found {len(documents)} documents through graph search")
                 return documents
 
@@ -105,69 +105,98 @@ class GraphStoreHelper:
             self.logger.error(f"Graph search error: {str(e)}, stack: {traceback.format_exc()}")
             return []
 
-    def _extract_entities(self, text: str) -> List[Dict]:
-        """Enhanced entity extraction with fallbacks"""
+    def _extract_entities(self, text: str) -> List[Dict[str, Any]]:
+        """Enhanced entity extraction optimized for RAG and graph storage"""
         try:
             entities = []
-            # Primary: Use spaCy for named entity recognition
             doc = self.nlp(text)
-            
-            # Process named entities
+
+            # 1. Named Entity Recognition with confidence scoring
             for ent in doc.ents:
+                # Filter out low-quality entities
+                if len(ent.text.strip()) < 2 or ent.text.strip().isnumeric():
+                    continue
+
                 entities.append({
                     "text": ent.text,
-                    "normalized_text": ent.text.lower().strip(),
+                    "normalized_text": self._normalize_entity(ent.text),
                     "label": ent.label_,
                     "start": ent.start_char,
-                    "end": ent.end_char
+                    "end": ent.end_char,
+                    "confidence": 1.0,  # Primary entities get highest confidence
+                    "type": "NER"
                 })
-            
-            # Add noun phrases as entities
+
+            # 2. Key Phrase Extraction
             for np in doc.noun_chunks:
-                if len(np.text.split()) > 1:  # Only multi-word phrases
+                # Filter for meaningful phrases
+                if (len(np.text.split()) > 1 and  # Multi-word phrases
+                        not any(word.is_stop for word in np) and  # No stop words
+                        not np.text.strip().isnumeric()):  # Not just numbers
+
                     entities.append({
                         "text": np.text,
-                        "normalized_text": np.text.lower().strip(),
-                        "label": "NOUN_PHRASE",
+                        "normalized_text": self._normalize_entity(np.text),
+                        "label": "KEY_PHRASE",
                         "start": np.start_char,
-                        "end": np.end_char
+                        "end": np.end_char,
+                        "confidence": 0.8,  # Secondary confidence
+                        "type": "PHRASE"
                     })
-            
-            # Fallback: Extract keywords if no entities found
-            if not entities:
-                for token in doc:
-                    if (not token.is_stop and not token.is_punct 
-                        and token.is_alpha and len(token.text) > 3):
-                        entities.append({
-                            "text": token.text,
-                            "normalized_text": token.text.lower().strip(),
-                            "label": "KEYWORD",
-                            "start": token.idx,
-                            "end": token.idx + len(token.text)
-                        })
-            
-            # Debug logging
-            self.logger.debug(f"Extracted entities: {entities}")
-            return entities
+
+            # 3. Domain-Specific Term Extraction
+            for token in doc:
+                if (token.pos_ in ['PROPN', 'NOUN'] and  # Focus on important POS
+                        not token.is_stop and
+                        len(token.text) > 3):
+                    entities.append({
+                        "text": token.text,
+                        "normalized_text": self._normalize_entity(token.text),
+                        "label": "DOMAIN_TERM",
+                        "start": token.idx,
+                        "end": token.idx + len(token.text),
+                        "confidence": 0.6,  # Tertiary confidence
+                        "type": "TERM"
+                    })
+
+            # 4. Entity Deduplication and Merging
+            merged_entities = self._merge_entities(entities)
+
+            self.logger.debug(f"Extracted {len(merged_entities)} unique entities")
+            return merged_entities
 
         except Exception as e:
             self.logger.error(f"Entity extraction error: {str(e)}, stack: {traceback.format_exc()}")
             return []
 
+    def _normalize_entity(self, text: str) -> str:
+        """Normalize entity text for better matching"""
+        # Remove special characters and extra whitespace
+        normalized = re.sub(r'[^\w\s]', ' ', text)
+        normalized = ' '.join(normalized.split())
+        return normalized.lower().strip()
+
+    def _merge_entities(self, entities: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Merge and deduplicate entities"""
+        merged = {}
+
+        for entity in sorted(entities, key=lambda x: x['confidence'], reverse=True):
+            norm_text = entity['normalized_text']
+
+            if norm_text not in merged:
+                merged[norm_text] = entity
+            else:
+                # Update existing entity if new one has higher confidence
+                if entity['confidence'] > merged[norm_text]['confidence']:
+                    merged[norm_text].update(entity)
+
+        return list(merged.values())
+
     def add_document(self, doc_id: str, chunks: List[Document], metadata: Dict[str, Any]) -> None:
         """Add document and chunks to graph with optimized batch processing"""
         try:
             with self.driver.session() as session:
-                # Create indexes in separate statements
-                session.run("""
-                    CREATE INDEX doc_id IF NOT EXISTS FOR (d:Document) ON (d.doc_id)
-                """)
-                
-                session.run("""
-                    CREATE INDEX doc_source IF NOT EXISTS FOR (d:Document) ON (d.source, d.source_type)
-                """)
-                
-                # Create or update document node
+                # Create document node with doc_id as primary key
                 session.run("""
                     MERGE (d:Document {doc_id: $doc_id})
                     ON CREATE SET 
@@ -177,6 +206,9 @@ class GraphStoreHelper:
                         d.created_at = datetime(),
                         d += $additional_metadata
                     ON MATCH SET 
+                        d.source = $source,
+                        d.source_type = $source_type,
+                        d.checksum = $checksum,
                         d.last_updated = datetime(),
                         d += $additional_metadata
                 """, {
@@ -184,15 +216,15 @@ class GraphStoreHelper:
                     "source": metadata['source'],
                     "source_type": metadata['source_type'],
                     "checksum": metadata['checksum'],
-                    "additional_metadata": {k: v for k, v in metadata.items() 
-                                         if k not in ['source', 'source_type', 'checksum']}
+                    "additional_metadata": {k: v for k, v in metadata.items()
+                                            if k not in ['source', 'source_type', 'checksum']}
                 })
 
                 # Process chunks and entities
                 for i, chunk in enumerate(chunks):
                     chunk_id = f"{doc_id}:chunk_{i}"
                     entities = self._extract_entities(chunk.page_content)
-                    
+
                     # Create chunk
                     session.run("""
                         MATCH (d:Document {doc_id: $doc_id})
@@ -234,9 +266,9 @@ class GraphStoreHelper:
                                 "text": e["text"],
                                 "label": e["label"],
                                 "context": chunk.page_content[
-                                    max(0, e.get("start", 0) - 40):
-                                    min(len(chunk.page_content), e.get("end", 0) + 40)
-                                ] if "start" in e and "end" in e else ""
+                                           max(0, e.get("start", 0) - 40):
+                                           min(len(chunk.page_content), e.get("end", 0) + 40)
+                                           ] if "start" in e and "end" in e else ""
                             } for e in entities]
                         })
 
@@ -251,55 +283,81 @@ class GraphStoreHelper:
         """
         try:
             with self.driver.session() as session:
-                result = session.run("""
-                    // Match the document and related nodes
+                # First verify if document exists
+                verify_result = session.run("""
                     MATCH (d:Document {doc_id: $doc_id})
-                    OPTIONAL MATCH (d)-[:HAS_CHUNK]->(c:Chunk)
-                    OPTIONAL MATCH (c)-[m:MENTIONS]->(e:Entity)
-                    
+                    RETURN d.doc_id as doc_id, d.source as source, d.source_type as source_type
+                """, {"doc_id": doc_id})
+
+                doc = verify_result.single()
+                if not doc:
+                    self.logger.warning(f"Document with doc_id {doc_id} not found in graph database")
+                    return False
+
+                self.logger.info(f"Found document to delete: {doc}")
+
+                # Proceed with deletion
+                result = session.run("""
+                    // Match the document by doc_id only
+                    MATCH (d:Document {doc_id: $doc_id})
+
+                    // Get related nodes
+                    OPTIONAL MATCH (d)-[r1:HAS_CHUNK]->(c:Chunk)
+                    OPTIONAL MATCH (c)-[r2:MENTIONS]->(e:Entity)
+
                     // Collect stats before deletion
-                    WITH d, c, m, e,
+                    WITH d, c, r1, r2, e,
                          count(DISTINCT d) as doc_count,
                          count(DISTINCT c) as chunk_count,
-                         count(DISTINCT m) as mention_count
-                    
-                    // Delete relationships and nodes
-                    DELETE m, c, d
-                    
+                         count(DISTINCT r2) as mention_count
+
+                    // Delete relationships first
+                    DELETE r1, r2
+
+                    // Then delete nodes
+                    WITH d, c, e, doc_count, chunk_count, mention_count
+                    DELETE c
+
+                    // Delete document
+                    WITH d, e, doc_count, chunk_count, mention_count
+                    DELETE d
+
                     // Handle orphaned entities
                     WITH e, doc_count, chunk_count, mention_count
                     WHERE e IS NOT NULL
                     AND NOT EXISTS((e)<-[:MENTIONS]-())
-                    
+
                     // Delete orphaned entities and return stats
                     WITH e, doc_count, chunk_count, mention_count,
                          count(e) as orphaned_count
                     DELETE e
-                    
-                    // Return all counts
+
                     RETURN doc_count as docs,
                            chunk_count as chunks,
                            mention_count as mentions,
                            orphaned_count as orphaned_entities
-                """, doc_id=doc_id)
-                
+                """, {
+                    "doc_id": doc_id
+                })
+
                 stats = result.single()
-                if stats and stats["docs"] > 0:
+                if stats:
                     self.logger.info(
-                        f"Successfully removed document {doc_id}. "
-                        f"Deleted: {stats['docs']} documents, "
-                        f"{stats['chunks']} chunks, "
-                        f"{stats['mentions']} mentions, "
-                        f"{stats['orphaned_entities']} orphaned entities"
+                        f"Deletion stats for document {doc_id}:\n"
+                        f"- Documents: {stats['docs']}\n"
+                        f"- Chunks: {stats['chunks']}\n"
+                        f"- Mentions: {stats['mentions']}\n"
+                        f"- Orphaned entities: {stats['orphaned_entities']}"
                     )
-                    return True
+                    return stats["docs"] > 0
                 else:
-                    self.logger.warning(f"Document {doc_id} not found in graph database")
+                    self.logger.error(f"No stats returned after deletion attempt for document {doc_id}")
                     return False
-                    
+
         except Exception as e:
             self.logger.error(
-                f"Error removing document {doc_id} from graph store: {str(e)}, "
-                f"stack: {traceback.format_exc()}"
+                f"Error removing document {doc_id} from graph store:\n"
+                f"Error: {str(e)}\n"
+                f"Stack: {traceback.format_exc()}"
             )
             return False

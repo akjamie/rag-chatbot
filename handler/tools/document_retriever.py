@@ -3,25 +3,25 @@ import traceback
 from typing import List
 
 from langchain_core.documents import Document
-from langchain_core.language_models import BaseChatModel
-from langchain_core.vectorstores import VectorStore
 from rank_bm25 import BM25Okapi
 
 from config.common_settings import CommonConfig
 from handler.store.graph_store_helper import GraphStoreHelper
+from handler.tools.base_tool import BaseTool, ToolDescription, ToolCategory, ToolArgument
 from handler.tools.hypothetical_answer import HypotheticalAnswerGenerator
 from handler.tools.query_expander import QueryExpander
 from utils.logging_util import logger
 
 
-class DocumentRetriever:
-    def __init__(self, llm: BaseChatModel, vectorstore: VectorStore, config: CommonConfig):
-        self.llm = llm
-        self.vectorstore = vectorstore
+class DocumentRetriever(BaseTool):
+    def __init__(self, config: CommonConfig):
+        super().__init__(config)
+        self.llm = self.config.get_model("chatllm")
+        self.vectorstore = self.config.get_vector_store()
         self.config = config
         self.logger = logger
-        self.query_expander = QueryExpander(llm)
-        self.hypothetical_generator = HypotheticalAnswerGenerator(llm)
+        self.query_expander = QueryExpander(self.llm)
+        self.hypothetical_generator = HypotheticalAnswerGenerator(self.llm)
         self.nlp = self.config.get_nlp_spacy()
 
         if self.config.get_query_config("search.graph_search_enabled", False):
@@ -56,6 +56,106 @@ class DocumentRetriever:
                 f"Reranking weights should sum to 1.0. Current sum: {self.vector_weight + self.rerank_weight}. "
                 f"Using reranker: {self.reranker.__class__.__name__ if self.reranker else 'BM25'}"
             )
+
+        self.max_documents = config.get_query_config("search.top_k", 5)
+        self.relevance_threshold = config.get_query_config("search.relevance_threshold", 0.6)
+
+    @property
+    def description(self) -> ToolDescription:
+        return ToolDescription(
+            name="document_retriever",
+            description="Retrieves relevant documents from the vector database or graph database",
+            category=ToolCategory.RETRIEVAL,
+            args={
+                "query": ToolArgument(
+                    description="The search query",
+                    type="str",
+                    example="What is the capital of France?",
+                    optional=False
+                ),
+                # "relevance_threshold": ToolArgument(
+                #     description="Relevance threshold score",
+                #     type="float",
+                #     example="0.6",
+                #     optional=True
+                # ),
+                # "max_documents": ToolArgument(
+                #     description="Maximum number of documents can be returned",
+                # )
+            },
+            return_type="List[Document]"
+        )
+
+    def run(self, **kwargs) -> List[Document]:
+        self.validate_inputs(**kwargs)
+
+        try:
+            query = kwargs["query"]
+            max_documents = kwargs.get("max_documents", self.max_documents)
+            relevance_threshold = kwargs.get("relevance_threshold", self.relevance_threshold)
+
+             # 1. Query Expansion
+            expanded_queries = self.query_expander.expand_query(query)
+            self.logger.info(f"Expanded queries: {expanded_queries}")
+            all_queries = [query] + expanded_queries
+
+            self.logger.info(f"Retrieving documents for query: {query}")
+
+             # 2. Vector Search with all queries
+            vector_results = []
+            for q in all_queries:
+                results = self.vectorstore.similarity_search_with_score(
+                    query=q,
+                    k=max_documents
+                )
+                # Store vector scores in metadata
+                for doc, score in results:
+                    doc.metadata["vector_score"] = score
+                    vector_results.append(doc)
+
+
+             # 3. Graph Database Search (if enabled)
+            if self.config.get_query_config("search.graph_search_enabled", False):
+                graph_results = self.graph_store_helper.find_related_chunks(query, max_documents)
+                self.logger.debug(f"Graph search results: {graph_results}")
+                vector_results.extend(graph_results)
+
+            # 4. Hypothetical Answer Search (if enabled)
+            if self.config.get_query_config("search.hypothetical_answer_enabled", False):
+                hypothetical = self.hypothetical_generator.generate(query)
+                self.logger.debug(f"Hypothetical answer: {hypothetical}")
+                if hypothetical:
+                    hyp_results = self.vectorstore.similarity_search_with_score(
+                        query=hypothetical,
+                        k=max_documents
+                    )
+                    # Store vector scores in metadata
+                    for doc, score in hyp_results:
+                        doc.metadata["vector_score"] = score
+                        vector_results.append(doc)
+
+            # 5. Merge and deduplicate results
+            merged_results = self._deduplicate_results(vector_results)
+
+            # 6. Rerank using appropriate method
+            reranked_results = self._rerank_documents(query, merged_results)
+
+            # 7. Filter and return top results
+            final_results = [
+                                doc for doc in reranked_results
+                                if doc.metadata.get("relevance_score", 0) >= relevance_threshold
+                            ][:max_documents]
+
+            self.logger.info(
+                f"Retrieved {len(final_results)} relevant documents "
+                f"(threshold: {relevance_threshold}, reranking: {self.rerank_enabled})"
+            )
+
+            return final_results
+
+        except Exception as e:
+            self.logger.error(f"Error retrieving documents: {str(e)}, stack: {traceback.format_exc()}")
+            return []
 
     def _rerank_documents(self, query: str, documents: List[Document]) -> List[Document]:
         """Rerank documents using model-based reranker or BM25"""
