@@ -16,7 +16,7 @@ class RedisUtil:
         self.index_key = "qa:index:questions"
         self.category_key_prefix = "qa:category:"
         self.vector_key_prefix = "qa:vector:"
-        self.expire_time = 86400  # 24 hours in seconds
+        self.expire_time = 0  # 24 hours in seconds
         
         # Load the sentence transformer model for text embedding
         self.model = SentenceTransformer('all-MiniLM-L6-v2')  # 384-dimension embeddings
