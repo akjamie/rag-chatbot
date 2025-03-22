@@ -1,5 +1,7 @@
 from contextlib import asynccontextmanager
 import time
+import redis
+import os
 
 from fastapi import FastAPI, Request
 from langchain.globals import set_debug
@@ -15,6 +17,7 @@ from utils.id_util import get_id
 from utils.logging_util import logger, set_context, clear_context
 from utils.audit_logger import AuditLogger
 from config.database.database_manager import DatabaseManager
+from utils.redis_util import RedisUtil
 
 # Global config instance
 base_config = CommonConfig()
@@ -141,11 +144,33 @@ app.include_router(health_router, prefix="/health")
 # 应用启动前初始化
 @app.on_event("startup")
 async def startup_event():
-    """应用启动时执行"""
-    # 初始化数据库表
-    config = CommonConfig()
-    AuditLogger.init_database(config)
-    logger.info("Application started")
+    """Application startup initialization"""
+    try:
+        # Initialize database tables
+        config = CommonConfig()
+        AuditLogger.init_database(config)
+        
+        # Initialize Redis and import Q&A data
+        redis_client = redis.Redis(
+            host=config.get_env_variable("REDIS_HOST", "localhost"),
+            port=int(config.get_env_variable("REDIS_PORT", 6379)),
+            db=int(config.get_env_variable("REDIS_DB", 0)),
+            decode_responses=True
+        )
+        
+        # Test Redis connection
+        redis_client.ping()
+        logger.info("Successfully connected to Redis")
+        
+        # Initialize RedisUtil and import Q&A data
+        redis_util = RedisUtil(redis_client)
+        qa_file_path = os.path.join(BASE_DIR, "data", "qa_pairs.json")
+        imported_count = redis_util.import_from_json(qa_file_path)
+        logger.info(f"Successfully imported {imported_count} Q&A pairs from {qa_file_path}")
+        
+    except Exception as e:
+        logger.error(f"Error during application startup: {str(e)}")
+        raise
 
 @app.get("/", include_in_schema=False)
 async def root():

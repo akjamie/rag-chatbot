@@ -1,0 +1,52 @@
+{
+    "qa_pairs": [
+        {
+            "question": "IDAM",
+            "answer": "IDAM is identity and access management system",
+            "category": "geography",
+            "created_at": "2024-03-20T10:00:00Z"
+        },
+        {
+            "question": "ITOP",
+            "answer": "ITOP is information technology operation platform",
+            "category": "politics",
+            "created_at": "2024-03-20T10:00:00Z"
+        },
+        {
+            "question": "VULN",
+            "answer": "Vulnerability management system",
+            "category": "science",
+            "created_at": "2024-03-20T10:00:00Z"
+        },
+        {
+            "question": "What is the chemical symbol for gold?",
+            "answer": "Au is the chemical symbol for gold.",
+            "category": "science",
+            "created_at": "2024-03-20T10:00:00Z"
+        },
+        {
+            "question": "Who painted the Mona Lisa?",
+            "answer": "Leonardo da Vinci painted the Mona Lisa.",
+            "category": "art",
+            "created_at": "2024-03-20T10:00:00Z"
+        },
+        {
+            "question": "What is the capital of Japan?",
+            "answer": "Tokyo is the capital of Japan.",
+            "category": "geography",
+            "created_at": "2024-03-20T10:00:00Z"
+        },
+        {
+            "question": "What is the largest mammal in the world?",
+            "answer": "The blue whale is the largest mammal in the world.",
+            "category": "science",
+            "created_at": "2024-03-20T10:00:00Z"
+        },
+        {
+            "question": "Who wrote 'Romeo and Juliet'?",
+            "answer": "William Shakespeare wrote 'Romeo and Juliet'.",
+            "category": "literature",
+            "created_at": "2024-03-20T10:00:00Z"
+        }
+    ]
+} 

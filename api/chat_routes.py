@@ -38,7 +38,7 @@ def process_query(
 ):
     logger.info(f"Received query: {request.user_input}")
     
-    # 记录请求开始和请求数据
+    # Record request start and request data
     start_time = audit_logger.start_step(
         x_request_id, x_user_id, x_session_id, 
         "chat_completion", {
@@ -48,7 +48,54 @@ def process_query(
     )
     
     try:
-        # 记录初始化处理器
+        # Step 1: Query Redis
+        redis_start = audit_logger.start_step(
+            x_request_id, x_user_id, x_session_id, "query_redis"
+        )
+        
+        redis_result = None
+        try:
+            from storage.redis_qa_storage import redis_qa_storage
+            redis_result = redis_qa_storage.find_answer(request.user_input, similarity_threshold=0.9)
+        except Exception as e:
+            logger.error(f"Error querying Redis: {str(e)}")
+            
+        audit_logger.end_step(
+            x_request_id, x_user_id, x_session_id, 
+            "query_redis", redis_start,
+            {"result": "found" if redis_result else "not_found"}
+        )
+        
+        # If an answer is found in Redis, return directly
+        if redis_result:
+            response = QueryResponse(
+                data={
+                    "answer": redis_result["answer"],
+                    "sources": [{"title": "Redis QA Database", "url": "", "content": ""}],
+                    "metadata": {
+                        "category": redis_result["category"],
+                        "similarity": redis_result["similarity"],
+                        "source": "redis"
+                    }
+                },
+                user_input=request.user_input
+            )
+            
+            # Record request end and response data
+            audit_logger.end_step(
+                x_request_id, x_user_id, x_session_id, 
+                "chat_completion", start_time, {
+                    "response_data": response.dict(),
+                    "status": "success",
+                    "source": "redis"
+                }
+            )
+            
+            return JSONResponse(content=response.dict(), 
+                            headers={"X-User-Id": x_user_id, "X-Session-Id": x_session_id, "X-Request-Id": x_request_id})
+        
+        # If no answer is found in Redis, continue with the original process
+        # Initialize handler
         handler_start = audit_logger.start_step(
             x_request_id, x_user_id, x_session_id, "initialize_handler"
         )
@@ -64,7 +111,7 @@ def process_query(
             "initialize_handler", handler_start
         )
         
-        # 记录处理查询
+        # Process query
         query_start = audit_logger.start_step(
             x_request_id, x_user_id, x_session_id, "handle_query"
         )
@@ -81,18 +128,19 @@ def process_query(
             "handle_query", query_start
         )
         
-        # 构建响应
+        # Build response
         response = QueryResponse(
             data=result,
             user_input=request.user_input
         )
         
-        # 记录请求结束和响应数据
+        # Record request end and response data
         audit_logger.end_step(
             x_request_id, x_user_id, x_session_id, 
             "chat_completion", start_time, {
                 "response_data": response.dict(),
-                "status": "success"
+                "status": "success",
+                "source": "workflow"
             }
         )
         
@@ -101,7 +149,7 @@ def process_query(
 
     except ValueError as e:
         logger.error(traceback.format_exc())
-        # 记录错误和响应数据
+        # Record error and response data
         error_response = {
             "error_message": str(e),
             "error_code": "BAD_REQUEST"
@@ -120,7 +168,7 @@ def process_query(
         )
     except Exception as e:
         logger.error(traceback.format_exc())
-        # 记录错误和响应数据
+        # Record error and response data
         error_response = {
             "error_message": str(e),
             "error_code": "INTERNAL_SERVER_ERROR"
