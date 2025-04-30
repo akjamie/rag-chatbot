@@ -123,13 +123,15 @@ class CommonConfig:
 
         if model_type == "cross-encoder" and model_name is not None:
             from sentence_transformers import CrossEncoder
-            model_path = Path(os.path.join(BASE_DIR, "../models/models--cross-encoder--ms-marco-MiniLM-L12-v2"))
-            return CrossEncoder(
-                # 'cross-encoder/ms-marco-MiniLM-L12-v2',
-                model_path,
-                max_length=1024,
-                local_files_only=True
-            )
+            
+            model_path = os.path.abspath(os.path.join(BASE_DIR, "..", "models", model_name))
+            self.logger.info(f"Loading cross-encoder model from local path: {model_path}")
+            
+            if os.path.exists(model_path):
+                return CrossEncoder(model_path, max_length=1024, local_files_only=True)
+            else:
+                self.logger.error(f"Local model path does not exist: {model_path}")
+                raise FileNotFoundError(f"Model not found at {model_path}")
 
         if model_type == "bge" and model_name is not None:
             from FlagEmbedding import FlagReranker
@@ -137,10 +139,11 @@ class CommonConfig:
 
     def get_tokenizer(self):
         """Get tokenizer by model name"""
-        model_path = Path(os.path.join(BASE_DIR, "../models/models--cross-encoder--ms-marco-MiniLM-L12-v2"))
+        model_path = Path(os.path.join(BASE_DIR, "../models/cross-encoder-ms-marco-MiniLM-L-12-v2"))
         self.logger.info(f"Get tokenizer by model name: {model_path}")
         from transformers import AutoTokenizer
         return AutoTokenizer.from_pretrained(model_path)
+
     def get_model(self, type):
         """Get model by type"""
         self.logger.info(f"Get model by type: {type}")
@@ -267,6 +270,7 @@ class CommonConfig:
                 collection_name=collection_name,
                 url=os.environ["QDRANT_URL"],
                 api_key=os.environ["QDRANT_API_KEY"],
+                force_recreate=True
             )
 
         elif vector_store_type == "redis":
@@ -384,6 +388,7 @@ class CommonConfig:
             raise ConfigError(f"Proxy setup failed: {str(e)}")
 
     def get_db_manager(self):
+        """Get database manager instance"""
         from config.database.database_manager import DatabaseManager
         return DatabaseManager(os.environ["POSTGRES_URI"])
 
