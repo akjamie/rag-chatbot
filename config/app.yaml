@@ -46,7 +46,7 @@ app:
       max_retries: 1 # max retry for query rewrite
       top_k: 5 # for retrieval top n documents, equal to max_documents
       relevance_threshold: 9.0 # for filter out low relevance documents
-      query_rewrite_enabled: true
+      query_rewrite_enabled: false
       # Parent-Child retrieval configuration
       parent_child_enabled: true # enable parent-child retrieval
       parent_chunk_size: 2000 # parent document size
