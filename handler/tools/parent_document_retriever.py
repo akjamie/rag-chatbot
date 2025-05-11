@@ -34,6 +34,7 @@ class ParentChildDocumentRetriever:
         
         # Configure parent-child settings from config
         search_config = self.config.get_query_config("search")
+        self.top_k_children = search_config.get("top_k_children", 2)
         self.parent_child_enabled = search_config.get("parent_child_enabled", False)
         
         # Only load these configurations if parent-child mode is enabled
@@ -287,7 +288,7 @@ class ParentChildDocumentRetriever:
             self.logger.debug(traceback.format_exc())
             return documents
     
-    def run(self, query: str, relevance_threshold: float = 0.7, max_documents: int = 2, retrieve_only_children: bool = False) -> List[Document]:
+    def run(self, query: str, relevance_threshold: float = 0.7, max_documents: int = 5, retrieve_only_children: bool = False) -> List[Document]:
         """
         Run retrieval for parent-child documents based on the query.
         
@@ -311,7 +312,7 @@ class ParentChildDocumentRetriever:
             # Use generic retrieval method and filter manually
             child_documents = self.vectorstore.similarity_search_with_score(
                 query=query,
-                k=max_documents * 3  # Retrieve more documents to ensure enough child documents after filtering
+                k=max_documents 
             )
             
             # Extract and parse scores, only keeping child documents
@@ -356,6 +357,31 @@ class ParentChildDocumentRetriever:
                 # Limit to maximum number of documents
                 return scored_children[:max_documents]
             
+            if self.rerank_enabled and self.reranker and scored_children:
+                self.logger.info(f"Reranking {len(scored_children)} child documents before parent retrieval")
+                reranked_children = self._rerank_documents(query, scored_children)
+                
+                # just use top k
+                top_children = reranked_children[:self.top_k_children]
+                self.logger.info(f"Using top {len(top_children)} child documents after reranking")
+                
+                # print top k child documents
+                print(f"\n=== Top {len(top_children)} child documents after reranking ===")
+                for i, doc in enumerate(top_children, 1):
+                    print(f"\nTop Child Document {i}:")
+                    print(f"Content: {doc.page_content[:200]}..." if len(doc.page_content) > 200 else doc.page_content)
+                    score = doc.metadata.get("rerank_score", "unknown")
+                    print(f"Rerank score: {score}")
+                    print(f"Parent document ID: {doc.metadata.get('parent_id', 'unknown')}")
+                    print(f"Source: {doc.metadata.get('source', 'unknown')}")
+                print("\n=== End of top child documents ===\n")
+                
+                # use top k child documents to get parent document ids
+                parent_info = self._get_parent_ids_from_children(top_children)
+            else:
+                # not rerank, use all child documents
+                parent_info = self._get_parent_ids_from_children(scored_children)
+
             # Get parent document IDs and sources from child documents
             parent_info = self._get_parent_ids_from_children(scored_children)
             
@@ -400,64 +426,3 @@ class ParentChildDocumentRetriever:
             print(f"\n=== Error during retrieval process: {str(e)} ===\n")
             raise
 
-
-if __name__ == "__main__":
-    """
-    Simple example code to test ParentChildDocumentRetriever functionality
-    """
-    try:
-        # Initialize configuration
-        config = CommonConfig()
-        # Get vector store
-        vectorstore = config.get_vector_store()
-        # Get language model
-        llm = config.get_model("chatllm")
-        
-        # Initialize retriever
-        retriever = ParentChildDocumentRetriever(llm, vectorstore, config)
-        
-        # Test query
-        query = "How to improve the accuracy of question answering systems using RAG technology?"
-        print(f"Test query: {query}")
-        
-        # Test retrieving only child documents
-        print("\n--- Retrieving Only Child Documents ---")
-        child_documents = retriever.run(query, retrieve_only_children=True)
-        print(f"Retrieved {len(child_documents)} child documents")
-        for i, doc in enumerate(child_documents, 1):
-            print(f"\nChild Document {i}:")
-            print(f"Content: {doc.page_content[:200]}...")
-            
-            # Print scores
-            if retriever.rerank_enabled:
-                score = doc.metadata.get("rerank_score", "unknown")
-                print(f"Rerank score: {score}")
-            else:
-                score = doc.metadata.get("vector_score", "unknown")
-                print(f"Vector similarity score: {score}")
-                
-            # Print metadata
-            print(f"Metadata: {doc.metadata}")
-        
-        # Test retrieving parent documents (default behavior)
-        print("\n--- Retrieving Parent Documents (Default Behavior) ---")
-        parent_documents = retriever.run(query)
-        print(f"Retrieved {len(parent_documents)} parent documents")
-        for i, doc in enumerate(parent_documents, 1):
-            print(f"\nParent Document {i}:")
-            print(f"Content: {doc.page_content[:200]}...")
-            
-            # Print scores
-            if retriever.rerank_enabled:
-                score = doc.metadata.get("rerank_score", "unknown")
-                print(f"Rerank score: {score}")
-            else:
-                score = doc.metadata.get("vector_score", "unknown")
-                print(f"Vector similarity score: {score}")
-                
-            # Print metadata
-            print(f"Metadata: {doc.metadata}")
-            
-    except Exception as e:
-        print(f"Error during testing: {str(e)}")
-        print(traceback.format_exc()) 
