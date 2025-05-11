@@ -15,6 +15,7 @@ from langgraph.checkpoint.memory import MemorySaver
 
 from config.common_settings import CommonConfig
 from handler.tools.document_retriever import DocumentRetriever
+from handler.tools.parent_document_retriever import ParentChildDocumentRetriever
 from handler.tools.query_rewriter import QueryRewriter
 from handler.tools.response_formatter import ResponseFormatter
 from handler.tools.response_grader import ResponseGrader
@@ -71,6 +72,11 @@ class QueryProcessWorkflow:
         self.response_formatter = ResponseFormatter(llm, config)
         self.query_rewriter = QueryRewriter(llm)
         self.response_grader = ResponseGrader(llm, config)
+        
+        # Initialize parent-child document retriever if enabled
+        self.parent_child_enabled = self.config.get_query_config("search.parent_child_enabled", False)
+        if self.parent_child_enabled:
+            self.parent_child_retriever = ParentChildDocumentRetriever(llm, vectorstore, config)
         
         self.graph = self._setup_graph()
         self.max_retries = config.get_query_config("search.max_retries", 1)
@@ -269,10 +275,27 @@ class QueryProcessWorkflow:
         )
         
         try:
-            # Original processing logic
+            # Get search configuration
             search_config = self.config.get_query_config("search")
-            documents = self.doc_retriever.run(query, relevance_threshold=search_config.get("relevance_threshold", 0.7),
-                                           max_documents=search_config.get("top_k", 5))
+            relevance_threshold = search_config.get("relevance_threshold", 0.7)
+            max_documents = search_config.get("top_k", 5)
+            
+            # Choose the appropriate retriever based on configuration
+            if self.parent_child_enabled:
+                self.logger.info("Using parent-child document retriever")
+                documents = self.parent_child_retriever.run(
+                    query, 
+                    relevance_threshold=relevance_threshold,
+                    max_documents=max_documents
+                )
+            else:
+                self.logger.info("Using standard document retriever")
+                documents = self.doc_retriever.run(
+                    query, 
+                    relevance_threshold=relevance_threshold,
+                    max_documents=max_documents
+                )
+                
             state["documents"] = documents
             
             # Set status as empty
@@ -284,6 +307,7 @@ class QueryProcessWorkflow:
                 request_id, user_id, session_id, 
                 "retrieve_documents", retrieve_start, {
                     "document_count": len(documents),
+                    "retriever_type": "parent-child" if self.parent_child_enabled else "standard",
                     "document_sources": [doc.metadata.get("source", "unknown") for doc in documents[:3]] if documents else [],
                     "status": "success"
                 }
