@@ -47,6 +47,13 @@ app:
       top_k: 5 # for retrieval top n documents, equal to max_documents
       relevance_threshold: 9.0 # for filter out low relevance documents
       query_rewrite_enabled: true
+      # Parent-Child retrieval configuration
+      parent_child_enabled: true # enable parent-child retrieval
+      parent_chunk_size: 2000 # parent document size
+      child_chunk_size: 400 # child document size
+      chunk_overlap: 50 # chunk overlap size
+      batch_size: 32 # batch size for processing
+      retrieve_only_children: false 
     grading: # for fact checking, the lower of the score, the higher risk of hallucination
       minimum_score: 0.7
     output:

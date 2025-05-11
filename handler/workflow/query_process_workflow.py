@@ -283,10 +283,13 @@ class QueryProcessWorkflow:
             # Choose the appropriate retriever based on configuration
             if self.parent_child_enabled:
                 self.logger.info("Using parent-child document retriever")
+                # 读取配置，决定是否只检索子文档
+                retrieve_only_children = self.config.get_query_config("search.retrieve_only_children", False)
                 documents = self.parent_child_retriever.run(
                     query, 
                     relevance_threshold=relevance_threshold,
-                    max_documents=max_documents
+                    max_documents=max_documents,
+                    retrieve_only_children=retrieve_only_children
                 )
             else:
                 self.logger.info("Using standard document retriever")

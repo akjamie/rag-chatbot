@@ -270,7 +270,7 @@ class CommonConfig:
                 collection_name=collection_name,
                 url=os.environ["QDRANT_URL"],
                 api_key=os.environ["QDRANT_API_KEY"],
-                force_recreate=True
+                force_recreate=False
             )
 
         elif vector_store_type == "redis":

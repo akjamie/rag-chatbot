@@ -135,7 +135,7 @@ class ParentChildDocumentRetriever:
             self.logger.debug(traceback.format_exc())
             return documents
     
-    def run(self, query: str, relevance_threshold: float = 0.7, max_documents: int = 5) -> List[Document]:
+    def run(self, query: str, relevance_threshold: float = 0.7, max_documents: int = 5, retrieve_only_children: bool = False) -> List[Document]:
         """
         Run retrieval for parent-child documents based on the query.
         
@@ -143,9 +143,10 @@ class ParentChildDocumentRetriever:
             query: The user query
             relevance_threshold: Minimum relevance score threshold
             max_documents: Maximum number of documents to retrieve
+            retrieve_only_children: 当设置为True时，只返回子文档而不检索父文档
             
         Returns:
-            List of parent documents, sorted by relevance
+            List of documents (either parent or child documents depending on retrieve_only_children), sorted by relevance
         """
         self.logger.info(f"Running parent-child document retrieval with query: {query}")
         
@@ -165,7 +166,26 @@ class ParentChildDocumentRetriever:
             for doc, score in child_documents:
                 doc.metadata["vector_score"] = score
                 scored_children.append(doc)
+            
+            # 如果只需要检索子文档，直接返回子文档
+            if retrieve_only_children:
+                self.logger.info("Retrieving only child documents as requested")
                 
+                # Filter by threshold if specified
+                if relevance_threshold > 0:
+                    scored_children = [
+                        doc for doc in scored_children 
+                        if doc.metadata.get("vector_score", 0) >= relevance_threshold
+                    ]
+                
+                # 对子文档进行重排序（如果启用）
+                if self.rerank_enabled:
+                    scored_children = self._rerank_documents(query, scored_children)
+                
+                # Limit to max_documents
+                return scored_children[:max_documents]
+            
+            # 下面是原有的父文档检索逻辑
             # Get parent IDs from the child documents
             parent_ids = self._get_parent_ids_from_children(scored_children)
             
@@ -227,13 +247,31 @@ if __name__ == "__main__":
         query = "如何使用RAG技术提高问答系统的准确性?"
         print(f"测试查询: {query}")
         
-        # 运行检索
-        documents = retriever.run(query)
+        # 测试只检索子文档
+        print("\n--- 只检索子文档 ---")
+        child_documents = retriever.run(query, retrieve_only_children=True)
+        print(f"共检索到 {len(child_documents)} 个子文档")
+        for i, doc in enumerate(child_documents, 1):
+            print(f"\n子文档 {i}:")
+            print(f"内容: {doc.page_content[:200]}...")
+            
+            # 打印分数
+            if retriever.rerank_enabled:
+                score = doc.metadata.get("rerank_score", "未知")
+                print(f"重排序分数: {score}")
+            else:
+                score = doc.metadata.get("vector_score", "未知")
+                print(f"向量相似度分数: {score}")
+                
+            # 打印元数据
+            print(f"元数据: {doc.metadata}")
         
-        # 打印结果
-        print(f"共检索到 {len(documents)} 个父文档")
-        for i, doc in enumerate(documents, 1):
-            print(f"\n文档 {i}:")
+        # 测试检索父文档（默认行为）
+        print("\n--- 检索父文档（默认行为） ---")
+        parent_documents = retriever.run(query)
+        print(f"共检索到 {len(parent_documents)} 个父文档")
+        for i, doc in enumerate(parent_documents, 1):
+            print(f"\n父文档 {i}:")
             print(f"内容: {doc.page_content[:200]}...")
             
             # 打印分数
