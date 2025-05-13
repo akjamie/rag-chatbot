@@ -399,23 +399,23 @@ class ParentChildDocumentRetriever:
                 return []
                 
             # Rerank parent documents if reranking is enabled
-            if self.rerank_enabled:
-                parent_documents = self._rerank_documents(query, parent_documents)
+            # if self.rerank_enabled:
+            #     parent_documents = self._rerank_documents(query, parent_documents)
                 
-            # Filter by threshold if specified
-            if relevance_threshold > 0:
-                # For reranked documents
-                if self.rerank_enabled:
-                    parent_documents = [
-                        doc for doc in parent_documents 
-                        if doc.metadata.get("rerank_score", 0) >= relevance_threshold
-                    ]
-                # For vector similarity scores
-                else:
-                    parent_documents = [
-                        doc for doc in parent_documents 
-                        if doc.metadata.get("vector_score", 0) >= relevance_threshold
-                    ]
+            # # Filter by threshold if specified
+            # if relevance_threshold > 0:
+            #     # For reranked documents
+            #     if self.rerank_enabled:
+            #         parent_documents = [
+            #             doc for doc in parent_documents 
+            #             if doc.metadata.get("rerank_score", 0) >= relevance_threshold
+            #         ]
+            #     # For vector similarity scores
+            #     else:
+            #         parent_documents = [
+            #             doc for doc in parent_documents 
+            #             if doc.metadata.get("vector_score", 0) >= relevance_threshold
+            #         ]
             
             # Limit to maximum number of documents
             return parent_documents[:max_documents]
