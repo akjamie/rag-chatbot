@@ -6,30 +6,18 @@ app:
       model: "BAAI/bge-large-en-v1.5"
 #      model: "BAAI/bge-large-en-v1.5"
     llm:
-#      type: "huggingface"
-#      model: "meta-llama/Llama-2-13b-chat-hf"
-#      type: "sparkllm"
-#      type: "ollama"
-#      model: "qwen2.5"
       type: "gemini"
       model: "gemini-2.0-flash-exp"
-#      type: anthropic
-#      model: claude-3-sonnet-20240229
     chatllm:
-#      type: "sparkllm"
-#      type: "qwen"
-#      model: "qwen2.5"
       type: "gemini"
       model: "gemini-2.0-flash-exp"
-#      type: "ollama"
-#      model: "llama3.1"
     rerank:
 #      type: "bge"
 #      model: "BAAI/bge-reranker-base"
 #      model: "BAAI/bge-reranker-large"
 #      model: "BAAI/bge-small-en-v1.5"
       type: "cross-encoder"
-      model: "cross-encoder/ms-marco-MiniLM-L-12-v2"
+      model: "cross-encoder-ms-marco-MiniLM-L-12-v2"
 #      model: "cross-encoder/ms-marco-MiniLM-L-6-v2"
   embedding:
     input_path: "./data/input"
@@ -57,8 +45,16 @@ app:
       web_search_enabled: true
       max_retries: 1 # max retry for query rewrite
       top_k: 5 # for retrieval top n documents, equal to max_documents
+      top_k_children: 2 # for rerank top n documents
       relevance_threshold: 9.0 # for filter out low relevance documents
-      query_rewrite_enabled: true
+      query_rewrite_enabled: false
+      # Parent-Child retrieval configuration
+      parent_child_enabled: true # enable parent-child retrieval
+      parent_chunk_size: 2000 # parent document size
+      child_chunk_size: 400 # child document size
+      chunk_overlap: 50 # chunk overlap size
+      batch_size: 32 # batch size for processing
+      retrieve_only_children: false 
     grading: # for fact checking, the lower of the score, the higher risk of hallucination
       minimum_score: 0.7
     output:
@@ -75,8 +71,8 @@ app:
   proxy:
     enabled: true
     no_proxy: "localhost,127.0.0.1"
-    http_proxy: "http://127.0.0.1:7890"
-    https_proxy: "http://127.0.0.1:7890"
+    http_proxy: "http://127.0.0.1:7897"
+    https_proxy: "http://127.0.0.1:7897"
   logging.level:
     root: "DEBUG"  # default for all packages including project and libraries
     utils.lock: "WARNING"
