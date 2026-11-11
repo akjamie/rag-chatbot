@@ -1,0 +1,9 @@
+schema: agentic-repo-change
+created: 2026-11-11
+requirement: "update the dependencies to get related libs/models to be updated and get it running,"
+grillMode: "interactive"
+changeType: "change"
+workflowMode: "spec-first"
+governanceMode: "supervised"
+level: "L2"
+levelReason: "Touches Graphify AST architectural hub: conversation/conversation_history_helper.py (22 inbound refs)"
