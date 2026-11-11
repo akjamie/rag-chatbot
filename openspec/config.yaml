@@ -1,0 +1,77 @@
+# asdlc governance overlay (managed by `asdlc init`).
+# The BU-managed schema defines the enterprise change flow:
+#   proposal -> specs -> review -> design -> tasks
+# with tasks generated AFTER approval (execution state, not intent).
+schema: agentic-repo-change
+
+context: |
+  This repo uses the Agentic SDLC flow. Everything runs through `asdlc`:
+    asdlc new <ID>       start a spec (scaffold + refresh the graph + explore.md)
+    asdlc lint <ID>      check the spec (artifacts + review + BDD/acceptance criteria)
+    asdlc approve <ID>   after the spec PR merges: record the approved SHA
+    asdlc apply <ID>     guard, then /opsx-apply
+    asdlc verify <ID>    check the implementation
+    asdlc archive <ID>   post-merge compaction (sync living specs; refresh AGENTS.md only on constitutional changes)
+  - The spec PR carries intent: proposal + spec delta + review.md (a change-dir
+    convention). tasks.md is execution state, generated AFTER approval.
+  - A code knowledge graph runs behind the scenes (graphify-out/); `asdlc new`
+    refreshes it and writes explore.md so the spec is grounded in the real code,
+    not guesses. The graph is a navigation aid, not the source of truth.
+  - After `asdlc new`, GRILL the author using the grilling skill (design-tree
+    interview, in rounds) and record settled decisions in clarifications.md
+    BEFORE writing proposal.md / specs.
+  - `asdlc status <ID>` shows where you are; `asdlc doctor` checks the setup.
+  - A bad spec is never edited: close it and run `asdlc new <NEW-ID>` again.
+
+rules:
+  proposal:
+    - "Reference any System Design or cross-repo contract this change touches."
+    - "Include Out of Scope and Dependencies & Assumptions sections."
+  specs:
+    - "Use SHALL/MUST. Each requirement needs a GIVEN/WHEN/THEN scenario (4 '#')."
+    - "Each requirement needs an 'Acceptance criteria' block: '- [ ] AC1: concrete assertion (test: path)'."
+    - "Add a '## Constraints & NFRs' section: performance, security, compliance as verifiable statements."
+    - "Add a '## Out of Scope' section: what this change explicitly does NOT cover."
+    - "Add a '## Test Strategy' section."
+  tasks:
+    - "Every task references the AC it implements: '- [ ] 1.1 desc (AC1) verify: how'."
+    - "Every task states how to verify completion in its own description."
+
+# Per-operation guidance (read natively by OpenSpec's apply/archive workflows).
+operations:
+  apply:
+    guidance:
+      - "Task-level TDD: failing test -> implement -> paste test output -> fresh-context review."
+      - "Never modify locked paths (proposal.md, specs/**). If the spec is wrong, STOP and"
+      - "close the change; start a fresh one with `asdlc new` - never edit an approved spec."
+  archive:
+    guidance:
+      - "BEFORE archiving, update AGENTS.md with anything durable this change taught:"
+      - "new conventions, commands, gotchas, module map changes (keep the asdlc routing"
+      - "block intact). AGENTS.md is the context layer for future agents."
+
+# Lint policy (policy-as-code). Severity per rule: blocker | major | off.
+lint:
+  version: "1"
+  rules:
+    R4-given: major
+    R6-ac-missing-test: blocker
+
+# External checks run by `asdlc verify` (tests / contract / security), in a
+# scrubbed environment (no secrets leak).
+# gates:
+#   external:
+#     - name: unit-tests
+#       command: npm test
+#     - name: security
+#       command: npm audit --audit-level=high
+
+# Independent AI verification (player != referee). The authoring agent (your IDE)
+# writes the change; THIS verifier must be a different agent/model. Preferred:
+# the CI-owned env ASDLC_VERIFY_COMMAND (trusted); the repo value is a fallback.
+# It receives the verification prompt on stdin and prints strict JSON:
+#   {"verdict":"PASS|FAIL","summary":"...","requirements":[...]}
+# verify:
+#   required: true
+#   command: "deepseek-verify --model deepseek-chat"   # or: pi -p, codex exec, ...
+schemaVersion: "1"
