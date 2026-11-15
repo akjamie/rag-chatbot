@@ -42,6 +42,8 @@ def mock_logger(monkeypatch):
             pass
         def debug(self, msg, *args, **kwargs):
             pass
+        def warning(self, msg, *args, **kwargs):
+            pass
     
     monkeypatch.setattr('config.common_settings.logger', MockLogger())
 

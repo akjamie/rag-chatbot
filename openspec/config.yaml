@@ -75,3 +75,7 @@ lint:
 #   required: true
 #   command: "deepseek-verify --model deepseek-chat"   # or: pi -p, codex exec, ...
 schemaVersion: "1"
+
+test:
+  runner: "node scripts/run-acceptance-tests.js"
+

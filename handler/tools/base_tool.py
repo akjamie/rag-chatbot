@@ -1,7 +1,9 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum
-from typing import Dict, Any
+from typing import Dict, Any, Generic, TypeVar
+
+T = TypeVar('T')
 
 from config.common_settings import CommonConfig
 from utils.logging_util import logger
@@ -34,7 +36,7 @@ class ToolDescription:
     args: Dict[str, ToolArgument]
     return_type: str
 
-class BaseTool(ABC):
+class BaseTool(ABC, Generic[T]):
     def __init__(self, config: CommonConfig):
         self.config = config
         self.logger = logger

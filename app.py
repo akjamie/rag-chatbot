@@ -2,7 +2,7 @@ from contextlib import asynccontextmanager
 import time
 
 from fastapi import FastAPI, Request
-from langchain.globals import set_debug
+from langchain_core.globals import set_debug
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.cors import CORSMiddleware
 

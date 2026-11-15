@@ -1,16 +1,16 @@
 # ASdlc Latest Risk Assessment Snapshot
-# Generated at: 2026-11-11T01:54:50.994Z
-# Change: update-dependencies-get-related-libs (seq: 2)
+# Generated at: 2026-11-15T08:30:45.321Z
+# Change: update-dependencies-get-related-libs (seq: 3)
 
 schema_version: 1
 change_id: update-dependencies-get-related-libs
-seq: 2
-prev_hash: b7780f816db8a4717feb76cc200ef8d735fc099ffc5c6de7156252b5abaedc9c
-timestamp: 2026-11-11T01:54:50.994Z
+seq: 3
+prev_hash: f75cce6d005d4a0cd072442e19adee1699ca0675f9e1ab7050e0cf065888757f
+timestamp: 2026-11-15T08:30:45.321Z
 actor:
   type: system
   id: asdlc
-stage: spec
+stage: impl
 role: primary
 compared_to: null
 status: ready
@@ -18,8 +18,8 @@ verdict: ok
 defaulted_cause: null
 change_type: chore
 source:
-  base_sha: HEAD
-  head_sha: null
+  base_sha: jamie
+  head_sha: HEAD
   harness_rules_version: 2026.10.0
   engine_version: 1.9.0
   task_ref: null
@@ -75,4 +75,4 @@ transition:
   to_level: L2
   direction: same
   triggers: []
-hash: f75cce6d005d4a0cd072442e19adee1699ca0675f9e1ab7050e0cf065888757f
+hash: 33ef3d95c4afd88016f105b02464a10a1855a6131fb330e0b329634ca34ffbb7

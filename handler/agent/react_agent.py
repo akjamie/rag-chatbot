@@ -1,13 +1,20 @@
 from typing import Dict, Any, List, Optional, Type
 from dataclasses import dataclass
-from langchain.agents import initialize_agent, Tool, AgentType, AgentExecutor
+try:
+    from langchain_classic.agents import initialize_agent, Tool, AgentType, AgentExecutor
+    from langchain_classic.agents.format_scratchpad import format_to_openai_function_messages
+    from langchain_classic.agents.output_parsers import OpenAIFunctionsAgentOutputParser
+    from langchain_classic.tools.render import format_tool_to_openai_function
+    from langchain_classic.memory import ConversationBufferMemory
+except ImportError:
+    from langchain.agents import initialize_agent, Tool, AgentType, AgentExecutor
+    from langchain.agents.format_scratchpad import format_to_openai_function_messages
+    from langchain.agents.output_parsers import OpenAIFunctionsAgentOutputParser
+    from langchain.tools.render import format_tool_to_openai_function
+    from langchain.memory import ConversationBufferMemory
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
-from langchain.agents.format_scratchpad import format_to_openai_function_messages
-from langchain.agents.output_parsers import OpenAIFunctionsAgentOutputParser
-from langchain.tools.render import format_tool_to_openai_function
-from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain.memory import ConversationBufferMemory
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from datetime import datetime
 from pydantic import create_model, BaseModel
 
@@ -32,6 +39,14 @@ class QueryResponse:
     citations: List[Dict[str, Any]]
     suggested_questions: List[str]
     metadata: Dict[str, Any]
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "answer": self.answer,
+            "citations": self.citations,
+            "suggested_questions": self.suggested_questions,
+            "metadata": self.metadata
+        }
 
 
 @dataclass

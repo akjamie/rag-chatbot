@@ -47,8 +47,9 @@ def process_query(
             request_id=x_request_id
         )
 
+        result_data = result.to_dict() if hasattr(result, "to_dict") else result
         return JSONResponse(content=QueryResponse(
-            data=result,
+            data=result_data,
             user_input=request.user_input
         ).dict(), headers={"X-User-Id": x_user_id, "X-Session-Id": x_session_id, "X-Request-Id": x_request_id})
 
@@ -131,7 +132,7 @@ async def stream_query(
 if __name__ == "__main__":
     base_config.setup_proxy()
 
-    from langchain.globals import set_debug
+    from langchain_core.globals import set_debug
 
     set_debug(True)
     query_handler = QueryHandler(
