@@ -5,9 +5,10 @@ grillMode: "interactive"
 changeType: "change"
 workflowMode: "spec-first"
 governanceMode: "supervised"
-level: "L2"
+level: "L3"
 levelReason: "Touches Graphify AST architectural hub: conversation/conversation_history_helper.py (22 inbound refs)"
 targetBranch: "jamie"
 lastPrType: "spec"
 specSha: 9d81e61e8e122df5f7f8f4631c3c217f8e2fa827
 status: ready_for_impl
+escalatedInImpl: "true"
