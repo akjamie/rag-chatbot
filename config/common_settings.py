@@ -22,7 +22,7 @@ class CommonConfig:
         dotenv_path = os.path.join(BASE_DIR, '..', '.env')
         if os.path.exists(dotenv_path):
             dotenv.load_dotenv(dotenv_path)
-        elif os.path.exists(os.getenv('DOTENV_PATH')):
+        elif os.getenv('DOTENV_PATH') and os.path.exists(os.getenv('DOTENV_PATH')):
             dotenv.load_dotenv(dotenv_path=os.getenv('DOTENV_PATH'))
         else:
             self.logger.warning(f".env file not found at{dotenv_path}")
@@ -49,7 +49,9 @@ class CommonConfig:
                 raise ConfigError(message)
             current = current[key]
 
-    def _get_llm_model(self, config):
+    def _get_llm_model(self, config=None):
+        if config is None:
+            config = self.config
         self.check_config(config, ["app", "models", "llm", "type"],
                           "LLM model is not found")
         self.logger.info(f"LLM model: {self.config['app']['models']['llm']}")

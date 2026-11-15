@@ -7,7 +7,7 @@ from pydantic import BaseModel
 
 from conversation.conversation_history_helper import ConversationHistoryHelper
 from conversation.repositories import ConversationHistoryRepository
-from handler.workflow.query_process_workflow import QueryProcessWorkflow, QueryResponse
+from handler.agent.react_agent import ReActAgent, QueryResponse
 from utils.logging_util import logger
 from utils.prompt_loader import load_txt_prompt
 
@@ -110,8 +110,19 @@ class QueryHandler:
         try:
             self.logger.info(f"Processing query, user_id:{user_id}, session_id:{session_id}, request_id:{request_id}, "
                              f"user_input:{user_id}")
-            workflow = QueryProcessWorkflow(self.llm, self.vector_store, self.config)
-            return workflow.invoke(user_input, user_id=user_id, request_id=request_id, session_id=session_id, original_query=original_query)
+            agent = ReActAgent(self.llm, self.config)
+            import asyncio
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = None
+            if loop and loop.is_running():
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    result = executor.submit(asyncio.run, agent.process_query(user_input, user_id=user_id, session_id=session_id, request_id=request_id)).result()
+            else:
+                result = asyncio.run(agent.process_query(user_input, user_id=user_id, session_id=session_id, request_id=request_id))
+            return result.to_dict() if hasattr(result, "to_dict") else result
         except Exception as e:
             self.logger.error(
                 f"Error in query processing: {str(e)}\n"
@@ -154,7 +165,7 @@ class QueryHandler:
         )
         self.logger.info(f"Query processed successfully, request_id:{request_id}, user_input:{user_id}, response:{final_response}")
 
-        return final_response.to_dict()
+        return final_response
 
 
 

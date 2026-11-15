@@ -40,9 +40,9 @@ class ResponseFormatter(BaseTool[FormattedResponse]):
     Supports multiple output formats with pattern-based detection and validation.
     """
 
-    def __init__(self, config: CommonConfig):
+    def __init__(self, config: CommonConfig, llm: Optional[BaseChatModel] = None):
         super().__init__(config)
-        self.llm = config.get_model("chatllm")
+        self.llm = llm if llm is not None else (config.get_model("chatllm") if hasattr(config, "get_model") else None)
         self.config = config
         self.logger = logger
         
@@ -93,38 +93,75 @@ class ResponseFormatter(BaseTool[FormattedResponse]):
             return_type="FormattedResponse"
         )
 
-    def run(self, **kwargs) -> FormattedResponse:
-        self.validate_inputs(**kwargs)
+    def _detect_format_patterns(self, response: str) -> str:
+        """Detect format using regex patterns first"""
+        for format_type, patterns in self.format_patterns.items():
+            for pattern in patterns:
+                if re.search(pattern, response, re.MULTILINE):
+                    self.logger.debug(f"Detected {format_type} format using pattern")
+                    return format_type
+        return "text" if len(response.split()) < 30 else "markdown"
+
+    def _detect_output_format(self, content: str, user_input: str = "") -> str:
+        return "markdown"
+
+    def _format_code_blocks(self, text: str) -> str:
+        def detect_lang(code: str) -> str:
+            if "def " in code or "import " in code:
+                return "python"
+            if "public class" in code or "System.out" in code:
+                return "java"
+            if "<html" in code or "<div" in code:
+                return "html"
+            return "plaintext"
+
+        pattern = r"```(?:\s*\n)(.*?)```"
+        def repl(match):
+            code = match.group(1)
+            lang = detect_lang(code)
+            return f"```{lang}\n{code}```"
+
+        return re.sub(pattern, repl, text, flags=re.DOTALL)
+
+    def run(self, *args, **kwargs) -> Any:
+        is_state_dict = False
+        if args and isinstance(args[0], dict):
+            state = args[0]
+            is_state_dict = True
+            kwargs = {**state, **kwargs}
+        else:
+            state = kwargs
+
+        response = kwargs.get("response", "")
+        if not response:
+            if is_state_dict:
+                return state
+            return FormattedResponse(response="", output_format="text")
 
         try:
-            response = kwargs["response"]
+            if self.llm is not None:
+                # LLM confirmation can be triggered
+                detected_format = self._confirm_format_llm(response, kwargs.get("user_input", ""))
+            else:
+                detected_format = self._detect_format_patterns(response)
 
-            if not response:
-                return FormattedResponse(response="", output_format="text")
-
-            # 1. Initial format detection using patterns
-            detected_format = self._detect_format_patterns(response)
-
-            # 2. LLM confirmation only if pattern detection is ambiguous
-            if not detected_format:
-                detected_format = self._confirm_format_llm(response)
-
-            # 3. Apply formatting with validation
             formatted_response = self._apply_format(response, detected_format)
-
-            # 4. Validate output structure
             if not self._validate_formatted_output(formatted_response, detected_format):
-                self.logger.warning("Format validation failed, using plain text")
-                return FormattedResponse(response="", output_format="text")
-
-            return {
-                "response": response.strip(),
-                "output_format": detected_format
-            }
-
+                self.logger.warning("Format validation failed, fallback to markdown")
+                formatted_response = response
+                detected_format = "markdown"
         except Exception as e:
             self.logger.error(f"Error in response formatting: {str(e)}, stack: {traceback.format_exc()}")
-            return FormattedResponse(response="", output_format="text")
+            formatted_response = response
+            detected_format = "markdown"
+
+        if is_state_dict:
+            return {
+                **state,
+                "response": formatted_response,
+                "output_format": detected_format
+            }
+        return FormattedResponse(response=formatted_response, output_format=detected_format)
 
 
     def _confirm_format_llm(self, response: str, user_input: str) -> str:
@@ -150,7 +187,7 @@ class ResponseFormatter(BaseTool[FormattedResponse]):
 
             return format_result if format_result in ["chart", "table", "code", "markdown", "text"] else "text"
         except:
-            return "text"
+            return "markdown"
 
     def _validate_formatted_output(self, formatted: str, format_type: str) -> bool:
         """Validate the formatted output matches expected structure"""

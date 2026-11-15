@@ -16,7 +16,10 @@ with patch('utils.logger_init.logger', mock_logger), \
     import yaml
 
     from config.database.database_manager import DatabaseManager
-    from preprocess.index_log import Base as IndexLogBase
+    try:
+        from preprocess.index_log import Base as IndexLogBase
+    except ModuleNotFoundError:
+        IndexLogBase = None
     from conversation import Base as ConversationBase
 
 SAMPLE_CONFIG = """
@@ -94,6 +97,8 @@ def mock_logger(monkeypatch):
         def error(self, msg, *args, **kwargs):
             pass
         def debug(self, msg, *args, **kwargs):
+            pass
+        def warning(self, msg, *args, **kwargs):
             pass
     
     monkeypatch.setattr('config.common_settings.logger', MockLogger())
