@@ -1,12 +1,12 @@
 # ASdlc Latest Risk Assessment Snapshot
-# Generated at: 2026-11-15T08:30:45.321Z
-# Change: update-dependencies-get-related-libs (seq: 3)
+# Generated at: 2026-11-15T08:36:24.159Z
+# Change: update-dependencies-get-related-libs (seq: 4)
 
 schema_version: 1
 change_id: update-dependencies-get-related-libs
-seq: 3
-prev_hash: f75cce6d005d4a0cd072442e19adee1699ca0675f9e1ab7050e0cf065888757f
-timestamp: 2026-11-15T08:30:45.321Z
+seq: 4
+prev_hash: 33ef3d95c4afd88016f105b02464a10a1855a6131fb330e0b329634ca34ffbb7
+timestamp: 2026-11-15T08:36:24.159Z
 actor:
   type: system
   id: asdlc
@@ -14,7 +14,7 @@ stage: impl
 role: primary
 compared_to: null
 status: ready
-verdict: ok
+verdict: escalated
 defaulted_cause: null
 change_type: chore
 source:
@@ -25,39 +25,58 @@ source:
   task_ref: null
   models: []
 risk:
-  level: L2
+  level: L3
   confidence: high
 vectors:
   v1_intent:
-    level: L0
+    level: L1
     confidence: high
     evaluator_mode: heuristic_seed
-    evidence:
-      - id: V1_AI_TEST_EVALUATION
-        kind: scanner_result
-        signal: soft
-        summary: "Deterministic Heuristic Baseline: Change is strictly confined to test
-          suites, mocks, and test assertions."
+    evidence: []
     unresolved: []
     mandatory_human_review: false
     no_signal: false
   v2_security:
-    level: L1
+    level: L3
     confidence: high
-    evidence: []
+    evidence:
+      - id: V2_HARD_GOV_PLANE
+        kind: rule_hit
+        rule_id: HARD_GOV_PLANE
+        signal: hard
+        summary: Modifies core Agent governance constitution or agent instructions
+          (openspec/config.yaml)
+        source: openspec/config.yaml
     unresolved: []
-    mandatory_human_review: false
-    no_signal: true
+    mandatory_human_review: true
+    no_signal: false
   v3_topology:
     level: L2
     confidence: high
     evidence:
+      - id: V3_HARD_API_CONTRACT
+        kind: rule_hit
+        rule_id: HARD_API_CONTRACT
+        signal: hard
+        summary: Modifies public API contracts, controllers, routers, or schemas (Spring
+          Boot, FastAPI, NestJS, Go, Proto, OpenAPI) (api/chat_routes.py)
+        source: api/chat_routes.py
       - id: V3_GRAPHIFY_GOD_NODE
         kind: topology_centrality
         signal: hard
-        summary: "Touches Graphify AST architectural hub:
-          conversation/conversation_history_helper.py (22 inbound refs)"
-        source: conversation/conversation_history_helper.py
+        summary: "Touches Graphify AST architectural hub: config/common_settings.py (75
+          inbound refs), handler/tools/base_tool.py (81 inbound refs)"
+        source: config/common_settings.py
+      - id: V3_SEM_PY_CONTRACT
+        kind: static_semantics
+        signal: hard
+        summary: Python server routing/contract in api/chat_routes.py
+        source: api/chat_routes.py
+      - id: V3_SEM_PY_CONTRACT
+        kind: static_semantics
+        signal: hard
+        summary: Python server routing/contract in api/chat_routes.py
+        source: api/chat_routes.py
     unresolved: []
     mandatory_human_review: false
     no_signal: false
@@ -68,11 +87,14 @@ governance:
   auto_approval: disabled
   mode: supervised
 reason_codes:
+  - ESCALATED_IN_IMPL
   - HARD_RULE_HIT
+  - SECURITY_BOUNDARY_POSSIBLE
 observations: []
 transition:
   from_level: L2
-  to_level: L2
-  direction: same
-  triggers: []
-hash: 33ef3d95c4afd88016f105b02464a10a1855a6131fb330e0b329634ca34ffbb7
+  to_level: L3
+  direction: up
+  triggers:
+    - Level escalated from L2 to L3
+hash: 4342fa2c930a108fc6442bf86308e5bdd53d90ec698333b903e51a5e09599796
